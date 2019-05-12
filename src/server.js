@@ -6,6 +6,8 @@ import morgan from 'morgan';
 import mongoose from 'mongoose';
 import socketio from 'socket.io';
 import http from 'http';
+import throttle from 'lodash.throttle';
+import debounce from 'lodash.debounce';
 import * as Notes from './controllers/note_controller';
 
 
@@ -53,6 +55,22 @@ server.listen(port);
 console.log(`listening on: ${port}`);
 
 io.on('connection', (socket) => {
+  let emitToSelf = (notes) => {
+    socket.emit('notes', notes);
+  };
+  emitToSelf = debounce(emitToSelf, 200);
+
+  let emitToOthers = (notes) => {
+    socket.broadcast.emit('notes', notes);
+  };
+  emitToOthers = throttle(emitToOthers, 25);
+
+  const pushNotesSmoothed = () => {
+    Notes.getNotes().then((result) => {
+      emitToSelf(result);
+      emitToOthers(result);
+    });
+  };
   // on first connection emit notes
   Notes.getNotes().then((result) => {
     socket.emit('notes', result);
@@ -78,7 +96,11 @@ io.on('connection', (socket) => {
 
   socket.on('updateNote', (id, fields) => {
     Notes.updateNote(id, fields).then(() => {
-      pushNotes();
+      if (fields.text) {
+        pushNotes();
+      } else {
+        pushNotesSmoothed();
+      }
     });
   });
 
